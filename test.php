@@ -5,12 +5,6 @@
  * Date: 07/03/2019
  * Time: 17:26
  */
-$recursive = false;
-$interpreter = false;
-$parser = false;
-$path_to_int = ".";
-$path_to_par = ".";
-$path_to_tests = ".";
 
 function check_help($argv)
 {
@@ -56,6 +50,7 @@ function check_args($argv)
         {
             $only_int = true;
             $arg_values["parser"] = false;
+            print("jsem tu?");
         }
         else if($arg == "--int-only" && $only_parse)
         {
@@ -93,41 +88,10 @@ function check_args($argv)
     return $arg_values;
 }
 
-function get_tests($start,$recursive)
-{
-    if(strtoupper(substr(PHP_OS, 0,3)) == "LIN")
-    {
-        str_replace(" ", "\ ", $start);
-    }
-    $tests = array();
-    $dir =  scandir($start);
-    foreach($dir as $item)
-    {
-        if(preg_match("/.+[.]src/", $item, $src_test))
-        {
-            if(strtoupper(substr(PHP_OS, 0,3)) == "LIN")
-            {
-                str_replace(" ", "\ ", $src_test[0]);
-            }
-            array_push($tests,$start."/".$src_test[0]);
-        }
-
-        if($item != "." && $item != ".." && is_dir($item) && $recursive)
-        {
-            if(strtoupper(substr(PHP_OS, 0,3)) == "LIN")
-            {
-                str_replace(" ", "\ ", $item);
-            }
-            $new_path = $start."/".$item;
-            $tests = array_merge($tests, get_tests($new_path, $recursive));
-        }
-    }
-    return $tests;
-}
-
-function check_for_other_files($file)
+function check_for_other_files_and_generate_missing($file)
 {//pokud chybi in, out, dogeneruje se prazdny, pro rc s nulou
     $file_without_suffix = str_replace(".src", ".", $file);
+    printf("file without suffix: ".$file_without_suffix."\n");
     if(!file_exists($file_without_suffix."rc"))
     {
         $rc = fopen($file_without_suffix."rc", "w");
@@ -145,9 +109,11 @@ function check_for_other_files($file)
         fclose($out);
     }
 }
-function html_add_info(object $html_output, $test, $passed, $int_or_par)
+
+function html_add_info(DOMDocument $html_output, $test, $passed, $int_or_par)
 {
-    $test_name = preg_match("([^\/]+(?=.src$))", $test)[0];
+    if(preg_match("([^\/]+(?=.src$))", $test, $test_name))
+        $test_name = $test_name[0]; //we want only the first (and only) match
     $msg = $test_name.": ".$int_or_par." ";
     if($passed)
     {
@@ -172,7 +138,92 @@ function html_add_info(object $html_output, $test, $passed, $int_or_par)
     return $new_record;
 }
 
+function run_test($input_args, $path_to_test, object $html_output)
+{
+    if($input_args["parser"])
+    {
+        //WARNING zmenit na php7.3
+        $command = "php ".$input_args["path_to_par"]."/parse.php <".$path_to_test;
+        print("*********Executing command: ".$command."\n");
+        exec($command, $parser_output, $parser_return_value);
+        $parser_output = implode("\n",$parser_output);
+        if(!$input_args["interpreter"])
+        {
+            $passed = true;
+            $path_to_output = str_replace(".src", ".out", $path_to_test);
+            $path_to_retval = str_replace(".src", ".rc", $path_to_test);
+
+            $expected_output = file_get_contents($path_to_output);
+            if(strcmp($parser_output, $expected_output) == 0)
+            {
+                $passed = false;
+                printf("!!!!!!!!!!!!!!!something is wrong.\n");
+                printf("Expected output:\n".$expected_output);
+                printf("Parser output\n".$parser_output."\n");
+            }
+
+            $expected_retval = file_get_contents($path_to_retval);
+            if($parser_return_value != $expected_retval)
+            {
+                $passed = false;
+                printf("!!!!!!!!!!!!!!!something is wrong.\n");
+                printf("Expected retval:\n".$expected_retval);
+                printf("Parser retval\n".$parser_return_value."\n");
+            }
+            print("*************".gettype($html_output));
+            $html_output->firstChild->firstChild->appendChild(html_add_info($html_output, $path_to_test, $passed, "parser"));
+        }
+    }
+    if($input_args["interpreter"])
+    {
+        if($input_args["parser"])
+        {
+            $input_file = fopen(str_replace(".src", ".xml", $path_to_test), "w");
+            fwrite($input_file, $parser_output);
+            fclose($input_file);
+            $interpreter_source =str_replace(".src", ".xml", $path_to_test);
+            $int_or_par = "both";
+        }
+        else
+        {
+            $interpreter_source = $path_to_test;
+            $int_or_par = "interpreter";
+        }
+
+        $interpreter_input = str_replace(".src", ".in", $path_to_test);
+        //warning change to python3
+        $command = "python ".$input_args["path_to_int"]."/interpret.py --source=".$interpreter_source." --input=".$interpreter_input;
+        printf("********Executing command: ".$command);
+        exec($command, $interpreter_output, $interpreter_return_value);
+        $interpreter_output = implode("\n",$interpreter_output);
+        $passed = true;
+        $path_to_output = str_replace(".src", ".out", $path_to_test);
+        $path_to_retval = str_replace(".src", ".rc", $path_to_test);
+
+        $expected_output = file_get_contents($path_to_output);
+        if($interpreter_output != $expected_output)
+        {
+            $passed = false;
+            printf("!!!!!!!!!!!!!!!something is wrong.\n");
+            printf("Expected output:\n".$expected_output);
+            printf("inter output\n".$interpreter_output."\n");
+        }
+
+        $expected_retval = file_get_contents($path_to_retval);
+        if($interpreter_return_value != $expected_retval)
+        {
+            $passed = false;
+            printf("!!!!!!!!!!!!!!!something is wrong.\n");
+            printf("Expected output:\n".$expected_retval);
+            printf("inter output\n".$interpreter_return_value."\n");
+        }
+        $html_output->firstChild->firstChild->appendChild(html_add_info($html_output, $path_to_test, $passed, $int_or_par));
+    /*run interpreter. if parser was ran too, redirect output from parser to interpreter via stdin - hope*/
+    }
+    //$html_output->appendChild(html_add_info($html_output, $path_to_test, true, "both"));
+}
 //main body starts here
+/*HTMLstart*/
 $html_output = new DOMDocument();
 $html = $html_output->createElement("html");//Create new <br> tag
 $html_output ->appendChild($html);//Add the <br> tag to document
@@ -180,7 +231,8 @@ $body = $html_output ->createElement("body");
 $attr = $html_output->createAttribute("style");
 $attr->value = "background-color: black";
 $body->appendChild($attr);
-$html->appendChild($body);
+$body = $html->appendChild($body);
+/*HTML end*/
 
 check_help($argv);
 $args = check_args($argv);
@@ -195,52 +247,34 @@ $parser = $args["parser"];
 $path_to_int = $args["path_to_int"];
 $path_to_par = $args["path_to_par"];
 $path_to_tests = $args["path_to_tests"];
-$test_list = get_tests($path_to_tests, $recursive);
 
-
-foreach($test_list as $test)
+print("path to test: ".$path_to_tests."\n");
+$Directory = new RecursiveDirectoryIterator($path_to_tests);
+if($recursive) $Directory = new RecursiveIteratorIterator($Directory);
+while($Directory->valid())
 {
-    check_for_other_files($test);
-    if($parser)
+
+    $path_name = $Directory->getSubPathName();
+    $path_name = $path_to_tests."/".$path_name;
+    if(preg_match("/^.*src$/", $path_name))
     {
-        exec("php7.3 ".$path_to_par."/parse.php <".$test, $output, $ret_val);
-        if($interpreter)
-        {
-            $parser_output = "parser_output ";
-        }
-        else
-        {
-            //TODO compare
-        }
+        print("Test found: ".$path_name."\n");
+        check_for_other_files_and_generate_missing($path_name); /*WARNING to lomitko muze zlobit*/
+        run_test($args, $path_name, $html_output);
     }
-
-    if($interpreter)
-    {
-        if($parser)
-        {
-            $input_data = $parser_output;
-        }
-        else
-        {
-            $input_data = $test;
-        }
-        exec("python3 ".$path_to_par."/interpret.py <".$input_data, $output, $ret_val);
-
-        $test_ok = false;
-        //TODO comapre
-
-        /** @var object $body */
-        $body->appendChild(html_add_info($html_output, $test, $test_ok, "interpreter"));
-        print($html_output->saveHTML());
-
-    }
+    $Directory->next();
 }
-//src - zdroják v IPPcode
+print(str_replace("><", ">\n<",$html_output->saveHTML()));
+$file = fopen("output.html", "w");
+fwrite($file,str_replace("><", ">\n<",$html_output->saveHTML()) );
+exit(-654);
+//src - zdroják v IPPcode/XML
 //rc - chybova hodnota
-//in - vstup
+//in - vstup pro interpretaci. NE ZDROJAK
 //out - vystup
 /*TODO
-overit, jak dobre se to spousti
-porovnat s referencnimi vystupy
-overit html vystup*/
+Pripravit testy
+Test s fake parse a interpreter
+opravit zlé vytváření HTML
+*/
 
