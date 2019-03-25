@@ -110,21 +110,30 @@ function check_for_other_files_and_generate_missing($file)
     }
 }
 
-function html_add_info(DOMDocument $html_output, $test, $passed, $int_or_par)
+function html_add_info(object $html_output, $test, $passed, $int_or_par, $additional_info=null)
 {
+    static $test_counter = 0;
     if(preg_match("([^\/]+(?=.src$))", $test, $test_name))
         $test_name = $test_name[0]; //we want only the first (and only) match
-    $msg = $test_name.": ".$int_or_par." ";
-    if($passed)
-    {
-        $msg = $msg."OK";
-    }
-    else
-    {
-        $msg=$msg."FAIL";
-    }
+
+    $line1 = $html_output->createTextNode($test_counter.": ".$test_name);
+    $line2 = $html_output->createTextNode("Full path: ".$test);
+    $line3 = $html_output->createTextNode("Tested ".$int_or_par." with result: ".($passed ? "OK" : "FAIL"));
+
     /** @var object $new_record */
-    $new_record = $html_output->createElement("p", $msg);//Create new <p> tag
+    $new_record = $html_output->createElement("p");//Create new <p> tag
+    $new_record->appendChild($line1);
+    $new_record->appendChild($html_output->createElement("br"));
+    $new_record->appendChild($line2);
+    $new_record->appendChild($html_output->createElement("br"));
+    $new_record->appendChild($line3);
+
+    if($additional_info)
+    {
+        $line4 = $html_output->createTextNode("Additional info: ".$additional_info);
+        $new_record->appendChild($html_output->createElement("br"));
+        $new_record->appendChild($line4);
+    }
     $attr = $html_output->createAttribute("style");
     if($passed)
     {
@@ -135,6 +144,7 @@ function html_add_info(DOMDocument $html_output, $test, $passed, $int_or_par)
         $attr->value = "color: red";
     }
     $new_record->appendChild($attr);
+    $test_counter++;
     return $new_record;
 }
 
@@ -171,7 +181,7 @@ function run_test($input_args, $path_to_test, object $html_output)
                 printf("Parser retval\n".$parser_return_value."\n");
             }
             print("*************".gettype($html_output));
-            $html_output->firstChild->firstChild->appendChild(html_add_info($html_output, $path_to_test, $passed, "parser"));
+            $html_output->firstChild->firstChild->appendChild(html_add_info($html_output, $path_to_test, $passed, "parser", (!$passed ? "Error" : null)));
         }
     }
     if($input_args["interpreter"])
@@ -192,7 +202,7 @@ function run_test($input_args, $path_to_test, object $html_output)
 
         $interpreter_input = str_replace(".src", ".in", $path_to_test);
         //warning change to python3
-        $command = "python ".$input_args["path_to_int"]."/interpret.py --source=".$interpreter_source." --input=".$interpreter_input;
+        $command = "python3 ".$input_args["path_to_int"]."/interpret.py --source=".$interpreter_source." --input=".$interpreter_input;
         printf("********Executing command: ".$command);
         exec($command, $interpreter_output, $interpreter_return_value);
         $interpreter_output = implode("\n",$interpreter_output);
@@ -217,7 +227,8 @@ function run_test($input_args, $path_to_test, object $html_output)
             printf("Expected output:\n".$expected_retval);
             printf("inter output\n".$interpreter_return_value."\n");
         }
-        $html_output->firstChild->firstChild->appendChild(html_add_info($html_output, $path_to_test, $passed, $int_or_par));
+        printf("PATH TO TESSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSST".$path_to_test."\n");
+        $html_output->firstChild->firstChild->appendChild(html_add_info($html_output, $path_to_test, $passed, $int_or_par, (!$passed ? "Error" : null)));
     /*run interpreter. if parser was ran too, redirect output from parser to interpreter via stdin - hope*/
     }
     //$html_output->appendChild(html_add_info($html_output, $path_to_test, true, "both"));
@@ -225,6 +236,7 @@ function run_test($input_args, $path_to_test, object $html_output)
 //main body starts here
 /*HTMLstart*/
 $html_output = new DOMDocument();
+$html_output->preserveWhiteSpace = true;
 $html = $html_output->createElement("html");//Create new <br> tag
 $html_output ->appendChild($html);//Add the <br> tag to document
 $body = $html_output ->createElement("body");
@@ -251,9 +263,9 @@ $path_to_tests = $args["path_to_tests"];
 print("path to test: ".$path_to_tests."\n");
 $Directory = new RecursiveDirectoryIterator($path_to_tests);
 if($recursive) $Directory = new RecursiveIteratorIterator($Directory);
+
 while($Directory->valid())
 {
-
     $path_name = $Directory->getSubPathName();
     $path_name = $path_to_tests."/".$path_name;
     if(preg_match("/^.*src$/", $path_name))
@@ -264,10 +276,13 @@ while($Directory->valid())
     }
     $Directory->next();
 }
+
 print(str_replace("><", ">\n<",$html_output->saveHTML()));
 $file = fopen("output.html", "w");
-fwrite($file,str_replace("><", ">\n<",$html_output->saveHTML()) );
-exit(-654);
+
+fwrite($file,str_replace("><", ">\n<",$html_output->saveHTML()));
+fclose($file);
+exit(99);
 //src - zdroják v IPPcode/XML
 //rc - chybova hodnota
 //in - vstup pro interpretaci. NE ZDROJAK
